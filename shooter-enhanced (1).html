@@ -141,6 +141,8 @@
           case 'railgun': return playSound(1100,0.28,'sine',0.07);
           case 'rocket': return playSound(260,0.35,'triangle',0.08);
           case 'katana': return playSound(900,0.12,'triangle',0.06);
+          case 'smg': return playSound(700,0.06,'square',0.04);
+          case 'crossbow': return playSound(500,0.18,'triangle',0.06);
           default: return playSound(800,0.08,'square',0.05);
         }
       }
@@ -252,6 +254,8 @@
         {id:'w_rail',name:'Railgun',icon:'rail',rarity:RARITY.LEGENDARY,desc:'Fast, piercing beam shot.',apply:()=>selectWeapon('railgun')},
         {id:'w_rocket',name:'Rocket Launcher',icon:'rocket',rarity:RARITY.LEGENDARY,desc:'Explosive rockets.',apply:()=>selectWeapon('rocket')},
         {id:'w_minigun',name:'Minigun',icon:'rate',rarity:RARITY.LEGENDARY,desc:'Very fast, low-damage stream of bullets.',apply:()=>selectWeapon('minigun')},
+        {id:'w_smg',name:'SMG',icon:'rate',rarity:RARITY.LEGENDARY,desc:'High fire rate, low damage, light spread.',apply:()=>selectWeapon('smg')},
+        {id:'w_crossbow',name:'Crossbow',icon:'pierce',rarity:RARITY.LEGENDARY,desc:'Slow but powerful piercing bolts.',apply:()=>selectWeapon('crossbow')},
       ];
       const weaponUpgradesByType={
         pistol:[
@@ -290,6 +294,16 @@
           {id:'wu_mini_titan',name:'Titanium Rounds',icon:'pierce',rarity:RARITY.LEGENDARY,desc:'+1 pierce.',apply:()=>{player.pierceCount+=1;}},
           {id:'wu_mini_feed',name:'Supersonic Feed',icon:'arrow',rarity:RARITY.LEGENDARY,desc:'+15% proj speed, +10% damage.',apply:()=>{player.bulletSpeed*=1.15;player.bulletDamage*=1.10;}},
           {id:'wu_mini_stab',name:'Stabilizer',icon:'spread',rarity:RARITY.LEGENDARY,desc:'-30% spread.',apply:()=>{player.spreadDeg*=0.7;}},
+        ],
+        smg:[
+          {id:'wu_smg_tune',name:'Tuned Springs',icon:'rate',rarity:RARITY.LEGENDARY,desc:'+20% fire rate.',apply:()=>{player.fireRate*=1.2;}},
+          {id:'wu_smg_comp',name:'Compensator',icon:'spread',rarity:RARITY.LEGENDARY,desc:'-25% spread.',apply:()=>{player.spreadDeg*=0.75;}},
+          {id:'wu_smg_hot',name:'Hot Rounds',icon:'fire',rarity:RARITY.LEGENDARY,desc:'+10% damage.',apply:()=>{player.bulletDamage*=1.10;}},
+        ],
+        crossbow:[
+          {id:'wu_xbow_bolt',name:'Heavy Bolts',icon:'damage',rarity:RARITY.LEGENDARY,desc:'+25% damage.',apply:()=>{player.bulletDamage*=1.25;}},
+          {id:'wu_xbow_pierce',name:'Barbed Tips',icon:'pierce',rarity:RARITY.LEGENDARY,desc:'+2 pierce.',apply:()=>{player.pierceCount+=2;}},
+          {id:'wu_xbow_string',name:'Reinforced String',icon:'arrow',rarity:RARITY.LEGENDARY,desc:'+15% projectile speed.',apply:()=>{player.bulletSpeed*=1.15;}},
         ],
       };
 
@@ -420,7 +434,8 @@
       function startRound(){
         world.bossRoundActive=(world.round%25===0);
         if(world.bossRoundActive){spawnBoss(); roundTextEl.textContent=`Round ${world.round} (Boss)`; return;}
-        const baseEnemies=5, enemiesToSpawn=Math.round(baseEnemies+world.round*2.0), enemyHp=Math.round(16+world.round*6), enemySpeed=80+world.round*6;
+        // Slightly harder scaling
+        const baseEnemies=6, enemiesToSpawn=Math.round(baseEnemies+world.round*2.4), enemyHp=Math.round(18+world.round*7.5), enemySpeed=86+Math.round(world.round*7);
         const greenEnabled=world.round>=11, greenChance=greenEnabled?clamp((world.round-10)*0.05,0.15,0.5):0;
         for(let i=0;i<enemiesToSpawn;i++){
           const side=Math.floor(Math.random()*4); let x,y;
@@ -442,6 +457,8 @@
         else if(type==='railgun'){player.fireRate=0.6;player.bulletDamage=120;player.bulletSpeed=1400;player.spreadDeg=2;player.pierceCount=8;}
         else if(type==='rocket'){player.fireRate=0.8;player.bulletDamage=40;player.bulletSpeed=420;player.spreadDeg=4;}
         else if(type==='minigun'){player.fireRate=16;player.bulletDamage=6;player.bulletSpeed=600;player.spreadDeg=6;}
+        else if(type==='smg'){player.fireRate=14;player.bulletDamage=9;player.bulletSpeed=580;player.spreadDeg=12;}
+        else if(type==='crossbow'){player.fireRate=1.1;player.bulletDamage=90;player.bulletSpeed=900;player.spreadDeg=1;player.pierceCount=Math.max(player.pierceCount,3);} 
         else {player.fireRate=5;player.bulletDamage=16;player.bulletSpeed=520;player.spreadDeg=10;}
         updateHud();
       }
@@ -535,6 +552,8 @@
         }
         if(player.weaponType==='railgun'){spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(8,player.pierceCount+8),radius:12,life:1.2,color:'#a78bfa',source:'railgun'}); playShootSound('railgun'); player.fireCooldown=cd; return true;}
         if(player.weaponType==='rocket'){const R=80*rocketExplosionScale,D=90*rocketExplosionScale; spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,radius:6,life:2.0,color:'#ef4444',explodeRadius:R,explodeDamage:D,source:'rocket'}); playShootSound('rocket'); player.fireCooldown=cd; return true;}
+        if(player.weaponType==='smg'){ fireMulti(angle,{color:'#7dd3fc'}); playShootSound('smg'); player.fireCooldown=cd*0.85; return true; }
+        if(player.weaponType==='crossbow'){ spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(4,player.pierceCount+2),radius:8,life:1.8,color:'#fbbf24',source:'crossbow'}); playShootSound('crossbow'); player.fireCooldown=cd; return true; }
         fireMulti(angle,{color:'#93c5fd'}); playShootSound('basic'); player.fireCooldown=cd; return true;
       }
       function fireMulti(angle,ov){const n=1+player.multiShot; if(n<=1){spawnBullet(player.x,player.y,angle,ov);return;} const s=(player.spreadDeg*Math.PI)/180,base=angle-s*(n-1)/2; for(let i=0;i<n;i++)spawnBullet(player.x,player.y,base+s*i,ov);}
