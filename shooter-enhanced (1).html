@@ -48,6 +48,9 @@
       <div class="pill" id="roundText">Round 1</div>
       <div class="pill" id="killsText">Kills 0</div>
       <div class="pill" id="scoreText">Score 0</div>
+      <button class="pill" id="upgradeToggleBtn" title="Toggle upgrade screens">Upgrades: On</button>
+      <div class="pill" id="bestText">Best 0</div>
+      <div class="pill" id="soundText">Sound On</div>
       <div class="pill" style="margin-left:auto">WASD: Move · Arrows: Shoot · Space: Dash · Esc/P: Pause</div>
     </div>
 
@@ -98,14 +101,15 @@
       function resize(){const dpr=Math.max(1,window.devicePixelRatio||1);canvas.width=Math.floor(canvas.clientWidth*dpr);canvas.height=Math.floor(canvas.clientHeight*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);} window.addEventListener('resize',resize); resize();
 
       // HUD & overlays
-      const hpFillEl=document.getElementById('hpFill'), hpTextEl=document.getElementById('hpText'), roundTextEl=document.getElementById('roundText'), killsTextEl=document.getElementById('killsText'), scoreTextEl=document.getElementById('scoreText'), weaponTextEl=document.getElementById('weaponText'), ammoTextEl=document.getElementById('ammoText');
+      const hpFillEl=document.getElementById('hpFill'), hpTextEl=document.getElementById('hpText'), roundTextEl=document.getElementById('roundText'), killsTextEl=document.getElementById('killsText'), scoreTextEl=document.getElementById('scoreText'), weaponTextEl=document.getElementById('weaponText'), ammoTextEl=document.getElementById('ammoText'), bestTextEl=document.getElementById('bestText'), soundTextEl=document.getElementById('soundText');
       const upgradeOverlay=document.getElementById('upgradeOverlay'), upgradeRow=document.getElementById('upgradeRow'), upgradeTitle=document.getElementById('upgradeTitle'), footerInfo=document.getElementById('footerInfo'), rerollBtn=document.getElementById('rerollBtn'), skipBtn=document.getElementById('skipBtn');
+      const upgradeToggleBtn=document.getElementById('upgradeToggleBtn');
       const pauseOverlay=document.getElementById('pauseOverlay'), statsGrid=document.getElementById('statsGrid'), resumeBtn=document.getElementById('resumeBtn');
       const gameOverOverlay=document.getElementById('gameOverOverlay'), gameOverTitle=document.getElementById('gameOverTitle'), finalStats=document.getElementById('finalStats'), restartBtn=document.getElementById('restartBtn'), continueBtn=document.getElementById('continueBtn');
 
       // State
       const keysDown=new Set();
-      const world={state:'playing',round:1,totalKills:0,score:0,time:0,upgradesTaken:0,scoreUpgradeStep:1000,nextScoreUpgradeAt:1000,pendingBonusUpgrades:0,bossRoundActive:false,endlessMode:false,rerolls:3};
+      const world={state:'playing',round:1,totalKills:0,score:0,time:0,upgradesTaken:0,scoreUpgradeStep:1000,nextScoreUpgradeAt:1000,pendingBonusUpgrades:0,bossRoundActive:false,endlessMode:false,rerolls:3,soundEnabled:true,bestScore:0,upgradesDisabled:false};
       const player={
         x:canvas.clientWidth/2,y:canvas.clientHeight/2,radius:14,color:'#5eead4',
         velocityX:0,velocityY:0,maxHp:100,hp:100,
@@ -122,6 +126,33 @@
         }
       };
       const enemies=[], bullets=[], pickups=[], particles=[];
+      
+      // Load best score from localStorage
+      try{ const storedBest=parseInt(localStorage.getItem('topScore')||'0',10); if(!isNaN(storedBest)) world.bestScore=storedBest; }catch(e){}
+      
+      // Simple sound system (Web Audio API)
+      let audioContext=null;
+      function getAudio(){ if(!audioContext){ try{ audioContext=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return audioContext; }
+      function playSound(freq=600,duration=0.12,type='square',volume=0.06){ if(!world.soundEnabled) return; const ctx=getAudio(); if(!ctx) return; try{ const o=ctx.createOscillator(); const g=ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.setValueAtTime(freq,ctx.currentTime); o.type=type; g.gain.setValueAtTime(0,ctx.currentTime); g.gain.linearRampToValueAtTime(volume,ctx.currentTime+0.01); g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+duration); o.start(); o.stop(ctx.currentTime+duration); }catch(e){} }
+      function playShootSound(weapon){
+        switch(weapon){
+          case 'pistol': return playSound(650,0.12,'sawtooth',0.06);
+          case 'shotgun': return playSound(380,0.22,'sawtooth',0.08);
+          case 'railgun': return playSound(1100,0.28,'sine',0.07);
+          case 'rocket': return playSound(260,0.35,'triangle',0.08);
+          case 'katana': return playSound(900,0.12,'triangle',0.06);
+          default: return playSound(800,0.08,'square',0.05);
+        }
+      }
+      function playDashSound(){ playSound(520,0.12,'triangle',0.05); }
+      
+      // Mouse aiming
+      let mouseDown=false; let mouse={x:canvas.clientWidth/2,y:canvas.clientHeight/2};
+      function updateMouse(e){ const rect=canvas.getBoundingClientRect(); mouse.x=e.clientX-rect.left; mouse.y=e.clientY-rect.top; }
+      function aimFromMouse(){ return { angle: Math.atan2(mouse.y-player.y, mouse.x-player.x) }; }
+      canvas.addEventListener('mousemove',updateMouse);
+      canvas.addEventListener('mousedown',e=>{ if(e.button===0){ mouseDown=true; updateMouse(e);} });
+      window.addEventListener('mouseup',e=>{ if(e.button===0) mouseDown=false; });
       let onKillExplosionLevel=0, rocketExplosionScale=1; // Shrapnel stacks by level
 
       // Icons
@@ -286,6 +317,12 @@
         setFooter();
       }
       function presentUpgradeChoices(opts={forceNormal:false,title:null,modeOverride:null}){
+        if(world.upgradesDisabled){
+          // Skip showing upgrades entirely
+          world.state='playing';
+          startRound();
+          return;
+        }
         // Decide mode
         if(!opts.forceNormal && ((world.upgradesTaken+1)%5===0)){
           if(player.weaponType==='basic'){currentOfferMode.type='weapon'; currentOfferMode.title='Choose a weapon';}
@@ -324,6 +361,10 @@
         regenerateOffers(); openUpgradeOverlay();
       }
       function presentBonusUpgrade(){
+        if(world.upgradesDisabled){
+          world.state='playing';
+          return; // Do not show bonus upgrades
+        }
         world.state='choosing';
         currentOfferMode={type:'bonus',title:'Bonus upgrade (Score)',onPick:null};
         // Assign onPick so bonus upgrades are selectable
@@ -341,11 +382,15 @@
         upgradeTitle.textContent=currentOfferMode.title;
         regenerateOffers(); openUpgradeOverlay();
       }
-      function openUpgradeOverlay(){upgradeOverlay.classList.add('show');}
+      function openUpgradeOverlay(){ if(world.upgradesDisabled) return; upgradeOverlay.classList.add('show');}
       function closeUpgradeOverlay(){upgradeOverlay.classList.remove('show');}
 
       // Score bonus
-      function updateScoreBonusUpgrades(){while(world.score>=world.nextScoreUpgradeAt){world.pendingBonusUpgrades+=1;world.nextScoreUpgradeAt+=world.scoreUpgradeStep;} if(world.state==='playing'&&world.pendingBonusUpgrades>0){presentBonusUpgrade();}}
+      function updateScoreBonusUpgrades(){
+        while(world.score>=world.nextScoreUpgradeAt){world.pendingBonusUpgrades+=1;world.nextScoreUpgradeAt+=world.scoreUpgradeStep;}
+        if(world.upgradesDisabled) return; // suppress bonus upgrade overlay
+        if(world.state==='playing'&&world.pendingBonusUpgrades>0){presentBonusUpgrade();}
+      }
 
       // Pause
       function togglePause(){ if(world.state==='playing'){world.state='paused'; renderStats(); pauseOverlay.classList.add('show');} else if(world.state==='paused'){world.state='playing'; pauseOverlay.classList.remove('show');} }
@@ -386,7 +431,7 @@
         roundTextEl.textContent=`Round ${world.round}`;
       }
       function spawnBoss(){const bossHp=world.endlessMode?2500+world.round*120:2000+world.round*100; enemies.push({x:canvas.clientWidth/2,y:-60,radius:26,color:'#a78bfa',hp:bossHp,maxHp:bossHp,speed:90,damage:28,type:'boss',burnTime:0,burnDps:0,poisonTime:0,poisonDps:0,lastDamageSource:null});}
-      function endRound(){const finished=world.round;world.round+=1; if(finished%10===0)world.rerolls+=1; world.state='choosing';presentUpgradeChoices();}
+      function endRound(){const finished=world.round;world.round+=1; if(finished%10===0)world.rerolls+=1; if(world.upgradesDisabled){ world.state='playing'; startRound(); } else { world.state='choosing'; presentUpgradeChoices(); }}
 
       // Weapons select
       function selectWeapon(type){
@@ -434,16 +479,40 @@
       window.addEventListener('keydown',e=>{
         const k=e.key.toLowerCase(); keysDown.add(k);
         if(k==='escape'||k==='p'){ if(!upgradeOverlay.classList.contains('show') && !gameOverOverlay.classList.contains('show')) togglePause(); return; }
+        if(k==='m'){
+          world.soundEnabled=!world.soundEnabled; soundTextEl.textContent=world.soundEnabled?'Sound On':'Sound Off';
+          return;
+        }
+        if(k==='u'){
+          world.upgradesDisabled=!world.upgradesDisabled;
+          if(typeof updateUpgradeToggleLabel==='function') updateUpgradeToggleLabel();
+          if(world.upgradesDisabled && upgradeOverlay.classList.contains('show')){
+            closeUpgradeOverlay();
+            if(world.state==='choosing'){ world.state='playing'; startRound(); }
+          }
+          return;
+        }
         if(world.state!=='playing')return;
         if(e.code==='Space'){
           if(player.dashCooldownTimer<=0&&!player.isDashing){
-            player.isDashing=true;player.dashTime=player.dashDuration;player.dashCooldownTimer=player.dashCooldown;spawnParticles(player.x,player.y,'#60a5fa',22);
+            player.isDashing=true;player.dashTime=player.dashDuration;player.dashCooldownTimer=player.dashCooldown;spawnParticles(player.x,player.y,'#60a5fa',22); playDashSound();
             if(player.weaponType==='katana'&&player.mods.katanaWhirl){const r=80,d=30;for(const en of enemies){if(distance(player,en)<=r+en.radius)en.hp-=d;}spawnParticles(player.x,player.y,'#a7f3d0',28);}
           }
           e.preventDefault();
         }
       });
       window.addEventListener('keyup',e=>{keysDown.delete(e.key.toLowerCase());});
+      // Upgrades toggle button
+      function updateUpgradeToggleLabel(){ upgradeToggleBtn.textContent = `Upgrades: ${world.upgradesDisabled?'Off':'On'}`; }
+      updateUpgradeToggleLabel();
+      upgradeToggleBtn.addEventListener('click',()=>{
+        world.upgradesDisabled=!world.upgradesDisabled;
+        updateUpgradeToggleLabel();
+        if(world.upgradesDisabled && upgradeOverlay.classList.contains('show')){
+          closeUpgradeOverlay();
+          if(world.state==='choosing'){ world.state='playing'; startRound(); }
+        }
+      });
       restartBtn.addEventListener('click',()=>{gameOverOverlay.classList.remove('show');resetGame();});
       continueBtn.addEventListener('click',()=>{gameOverOverlay.classList.remove('show');world.state='playing';world.endlessMode=true;world.round+=1;startRound();});
 
@@ -452,21 +521,21 @@
       function aimAtNearestEnemy(){ if(enemies.length===0) return null; let best=enemies[0],bd=1e9; for(const e of enemies){const d=Math.hypot(e.x-player.x,e.y-player.y); if(d<bd){bd=d;best=e;}} return {angle:Math.atan2(best.y-player.y,best.x-player.x)}; }
       function tryShoot(angle){
         const multiPenalty=1+0.15*player.multiShot; let base=player.fireRate; if(player.weaponType==='shotgun'&&player.mods.doubleBarrel)base*=0.8; const cd=(1/base)*multiPenalty;
-        if(player.weaponType==='katana'){if(player.weapon.katanaCooldownTimer>0)return false; performSlash(angle); player.weapon.katanaCooldownTimer=player.weapon.katanaCooldown; return true;}
+        if(player.weaponType==='katana'){if(player.weapon.katanaCooldownTimer>0)return false; performSlash(angle); playShootSound('katana'); player.weapon.katanaCooldownTimer=player.weapon.katanaCooldown; return true;}
         if(player.fireCooldown>0)return false;
         if(player.weaponType==='pistol'){
           if(player.weapon.reloading)return false; if(player.weapon.magazine<=0){startReload();return false;}
-          fireDualMulti(angle,{color:'#22d3ee'}); if(player.mods.pistolDoubleTap && Math.random()<0.25) fireDualMulti(angle,{color:'#22d3ee'});
+          fireDualMulti(angle,{color:'#22d3ee'}); if(player.mods.pistolDoubleTap && Math.random()<0.25) fireDualMulti(angle,{color:'#22d3ee'}); playShootSound('pistol');
           player.weapon.magazine-=1; player.fireCooldown=cd; return true;
         }
         if(player.weaponType==='shotgun'){
           const n=player.weapon.pellets,deg=player.weapon.pelletSpreadDeg,rad=(deg*Math.PI)/180,baseA=angle-rad*0.5;
-          for(let i=0;i<n;i++){const t=n>1?i/(n-1):0.5; const a=baseA+t*rad+randRange(-0.04,0.04); spawnBullet(player.x,player.y,a,{life:player.weapon.pelletLife,damage:player.bulletDamage,color:'#f59e0b'});}
+          for(let i=0;i<n;i++){const t=n>1?i/(n-1):0.5; const a=baseA+t*rad+randRange(-0.04,0.04); spawnBullet(player.x,player.y,a,{life:player.weapon.pelletLife,damage:player.bulletDamage,color:'#f59e0b'});} playShootSound('shotgun');
           player.fireCooldown=cd; return true;
         }
-        if(player.weaponType==='railgun'){spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(8,player.pierceCount+8),radius:12,life:1.2,color:'#a78bfa',source:'railgun'}); player.fireCooldown=cd; return true;}
-        if(player.weaponType==='rocket'){const R=80*rocketExplosionScale,D=90*rocketExplosionScale; spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,radius:6,life:2.0,color:'#ef4444',explodeRadius:R,explodeDamage:D,source:'rocket'}); player.fireCooldown=cd; return true;}
-        fireMulti(angle,{color:'#93c5fd'}); player.fireCooldown=cd; return true;
+        if(player.weaponType==='railgun'){spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(8,player.pierceCount+8),radius:12,life:1.2,color:'#a78bfa',source:'railgun'}); playShootSound('railgun'); player.fireCooldown=cd; return true;}
+        if(player.weaponType==='rocket'){const R=80*rocketExplosionScale,D=90*rocketExplosionScale; spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,radius:6,life:2.0,color:'#ef4444',explodeRadius:R,explodeDamage:D,source:'rocket'}); playShootSound('rocket'); player.fireCooldown=cd; return true;}
+        fireMulti(angle,{color:'#93c5fd'}); playShootSound('basic'); player.fireCooldown=cd; return true;
       }
       function fireMulti(angle,ov){const n=1+player.multiShot; if(n<=1){spawnBullet(player.x,player.y,angle,ov);return;} const s=(player.spreadDeg*Math.PI)/180,base=angle-s*(n-1)/2; for(let i=0;i<n;i++)spawnBullet(player.x,player.y,base+s*i,ov);}
       // Dual pistols: two side-by-side bullets per projectile; multishot doubles total bullets (2 per shot per multishot unit)
@@ -508,7 +577,7 @@
         if(player.weapon.katanaCooldownTimer>0)player.weapon.katanaCooldownTimer-=dt;
 
         // Shooting
-        player.fireCooldown-=dt; let aim=aimFromArrows(); if(!aim && player.autoFire) aim=aimAtNearestEnemy(); if(aim)tryShoot(aim.angle);
+        player.fireCooldown-=dt; let aim = mouseDown ? aimFromMouse() : aimFromArrows(); if(!aim && player.autoFire) aim=aimAtNearestEnemy(); if(aim)tryShoot(aim.angle);
 
         // Bullets
         for(let i=bullets.length-1;i>=0;i--){
@@ -602,7 +671,7 @@
         updateHud();
       }
 
-      function updateHud(){const hpPct=clamp(player.hp/player.maxHp,0,1); hpFillEl.style.width=`${Math.round(hpPct*100)}%`; hpTextEl.textContent=`${Math.round(player.hp)}/${player.maxHp}`; const weaponLabel=(player.weaponType==='pistol')?'Dual pistols':(player.weaponType[0].toUpperCase()+player.weaponType.slice(1)); weaponTextEl.textContent=`Weapon: ${weaponLabel}`; if(player.weaponType==='pistol'){ammoTextEl.textContent=player.weapon.reloading?`Reloading...`:`Ammo: ${player.weapon.magazine}/${player.weapon.magazineSize}`; ammoTextEl.classList.remove('hidden');} else ammoTextEl.classList.add('hidden');}
+      function updateHud(){const hpPct=clamp(player.hp/player.maxHp,0,1); hpFillEl.style.width=`${Math.round(hpPct*100)}%`; hpTextEl.textContent=`${Math.round(player.hp)}/${player.maxHp}`; const weaponLabel=(player.weaponType==='pistol')?'Dual pistols':(player.weaponType[0].toUpperCase()+player.weaponType.slice(1)); weaponTextEl.textContent=`Weapon: ${weaponLabel}`; if(player.weaponType==='pistol'){ammoTextEl.textContent=player.weapon.reloading?`Reloading...`:`Ammo: ${player.weapon.magazine}/${player.weapon.magazineSize}`; ammoTextEl.classList.remove('hidden');} else ammoTextEl.classList.add('hidden'); if(world.score>world.bestScore){world.bestScore=world.score; try{localStorage.setItem('topScore',String(world.bestScore));}catch(e){}} bestTextEl.textContent=`Best ${world.bestScore}`; soundTextEl.textContent=world.soundEnabled?'Sound On':'Sound Off';}
 
       function draw(){
         // Clear with padding (for subtle shake compatibility)
