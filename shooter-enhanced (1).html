@@ -110,20 +110,32 @@
       // State
       const keysDown=new Set();
       const world={state:'playing',round:1,totalKills:0,score:0,time:0,upgradesTaken:0,scoreUpgradeStep:1000,nextScoreUpgradeAt:1000,pendingBonusUpgrades:0,bossRoundActive:false,endlessMode:false,rerolls:3,soundEnabled:true,bestScore:0,upgradesDisabled:false};
+
+      // Screen shake
+      let screenShake={intensity:0,duration:0,timer:0};
+      function triggerScreenShake(intensity=8,duration=0.15){
+        screenShake.intensity=intensity;
+        screenShake.duration=duration;
+        screenShake.timer=duration;
+      }
+      // Hit feedback
+      let hitFlashTimer=0, hitFlashDuration=0.12;
+      let hitStopTimer=0;
+
+      // Floating damage numbers
+      const damageNumbers=[];
       const player={
         x:canvas.clientWidth/2,y:canvas.clientHeight/2,radius:14,color:'#5eead4',
         velocityX:0,velocityY:0,maxHp:100,hp:100,
         baseMoveSpeed:240,dashSpeed:640,isDashing:false,dashTime:0,dashDuration:0.16,dashCooldown:2.6,dashCooldownTimer:0,
         fireRate:5,fireCooldown:0,bulletSpeed:520,bulletDamage:16,bulletRadius:5,
         baseBulletLife:2.2,bulletLifeMultiplier:1.0,homingStrength:0,
-        pierceCount:0,bounceCount:0,multiShot:0,spreadDeg:10,critChance:0.05,critMultiplier:1.5,pickupRadius:80,
-        luckLevel:0, weaponType:'basic', autoFire:false,
-        weapon:{magazineSize:12,magazine:12,reloadTime:1.2, reloadTimer:0,reloading:false, pellets:7,pelletSpreadDeg:34,pelletLife:0.6, katanaCooldown:0.35,katanaCooldownTimer:0,katanaRange:86,katanaArcDeg:100,katanaDamage:42},
-        mods:{
-          bulletFireLevel:0,bulletPoisonLevel:0,katanaFireLevel:0,katanaPoisonLevel:0,
-          fasterReload:false,biggerMag:false,choke:false,doubleBarrel:false,slug:false,swiftSlash:false,extendedReach:false,
-          pistolDoubleTap:false,shotgunKnockback:false,katanaWhirl:false,railChain:false,rocketCluster:false
-        }
+        pierceCount:0,bounceCount:0,multiShot:0,spreadDeg:10,critChance:0.05,critMultiplier:1.5,
+        pickupRadius:80,luckLevel:0,weaponType:'basic',autoFire:false,
+        lastAimAngle:0,
+        weapon:{magazineSize:12,magazine:12,reloadTime:1.2,reloadTimer:0,reloading:false,pellets:7,pelletSpreadDeg:34,pelletLife:0.6,katanaCooldown:0.35,katanaCooldownTimer:0,katanaRange:86,katanaArcDeg:100,katanaDamage:42,
+          burst:{active:false,shotsLeft:0,interval:0.07,timer:0,size:3}},
+        mods:{}
       };
       const enemies=[], bullets=[], pickups=[], particles=[];
       
@@ -143,6 +155,8 @@
           case 'katana': return playSound(900,0.12,'triangle',0.06);
           case 'smg': return playSound(700,0.06,'square',0.04);
           case 'crossbow': return playSound(500,0.18,'triangle',0.06);
+          case 'burst': return playSound(800,0.05,'square',0.04);
+          case 'sniper': return playSound(300,0.24,'sine',0.07);
           default: return playSound(800,0.08,'square',0.05);
         }
       }
@@ -160,7 +174,7 @@
       // Icons
       function icon(name){const s='currentColor';switch(name){
         case'heart':return'<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.5-9-8 0-7 4-7 5 3 5 3 1-3 5-3 6 3 4 7-9 8-9 8z" stroke="'+s+'" stroke-width="1.5"/></svg>';
-        case'plus':return'<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="'+s+'" stroke-width="1.8"/></svg>';
+        case'plus':return'<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14M5 8h10M5 16h10" stroke="'+s+'" stroke-width="1.8"/></svg>';
         case'boot':return'<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 18h12M7 14l3 4m7-4-3 4" stroke="'+s+'" stroke-width="1.5"/></svg>';
         case'rate':return'<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12h4m3 0h9" stroke="'+s+'" stroke-width="2"/><path d="M8 12c0-4 2-6 4-6s4 2 4 6-2 6-4 6-4-2-4-6z" stroke="'+s+'" stroke-width="1.2"/></svg>';
         case'arrow':return'<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12h12M10 6l6 6-6 6" stroke="'+s+'" stroke-width="1.8"/></svg>';
@@ -215,8 +229,8 @@
         Object.assign(world,{state:'playing',round:1,totalKills:0,score:0,time:0,upgradesTaken:0,scoreUpgradeStep:1000,nextScoreUpgradeAt:1000,pendingBonusUpgrades:0,bossRoundActive:false,endlessMode:false,rerolls:3});
         enemies.length=bullets.length=pickups.length=particles.length=0; onKillExplosionLevel=0; rocketExplosionScale=1;
         Object.assign(player,{x:canvas.clientWidth/2,y:canvas.clientHeight/2,velocityX:0,velocityY:0,maxHp:100,hp:100,baseMoveSpeed:240,dashSpeed:640,isDashing:false,dashTime:0,dashDuration:0.16,dashCooldown:2.6,dashCooldownTimer:0, fireRate:5,fireCooldown:0,bulletSpeed:520,bulletDamage:16,bulletRadius:5, baseBulletLife:2.2,bulletLifeMultiplier:1.0,homingStrength:0, pierceCount:0,bounceCount:0,multiShot:0,spreadDeg:10,critChance:0.05,critMultiplier:1.5,pickupRadius:80,luckLevel:0,weaponType:'basic',autoFire:false});
-        Object.assign(player.weapon,{magazineSize:12,magazine:12,reloadTime:1.2,reloadTimer:0,reloading:false,pellets:7,pelletSpreadDeg:34,pelletLife:0.6,katanaCooldown:0.35,katanaCooldownTimer:0,katanaRange:86,katanaArcDeg:100,katanaDamage:42});
-        Object.assign(player.mods,{bulletFireLevel:0,bulletPoisonLevel:0,katanaFireLevel:0,katanaPoisonLevel:0,fasterReload:false,biggerMag:false,choke:false,doubleBarrel:false,slug:false,swiftSlash:false,extendedReach:false,pistolDoubleTap:false,shotgunKnockback:false,katanaWhirl:false,railChain:false,rocketCluster:false});
+        Object.assign(player.weapon,{magazineSize:12,magazine:12,reloadTime:1.2, reloadTimer:0,reloading:false, pellets:7,pelletSpreadDeg:34,pelletLife:0.6, katanaCooldown:0.35,katanaCooldownTimer:0,katanaRange:86,katanaArcDeg:100,katanaDamage:42});
+        player.mods={bulletFireLevel:0,bulletPoisonLevel:0,katanaFireLevel:0,katanaPoisonLevel:0,fasterReload:false,biggerMag:false,choke:false,doubleBarrel:false,slug:false,swiftSlash:false,extendedReach:false,pistolDoubleTap:false,shotgunKnockback:false,katanaWhirl:false,railChain:false,rocketCluster:false};
         updateHud(); startRound();
       }
 
@@ -251,6 +265,8 @@
         {id:'w_pistol',name:'Dual Pistols',icon:'pistol',rarity:RARITY.LEGENDARY,desc:'Fires two parallel shots. 15-round mag, reloads. High damage.',apply:()=>selectWeapon('pistol')},
         {id:'w_shotgun',name:'Shotgun',icon:'shotgun',rarity:RARITY.LEGENDARY,desc:'7-pellet blast. Slow, heavy burst.',apply:()=>selectWeapon('shotgun')},
         {id:'w_katana',name:'Katana',icon:'katana',rarity:RARITY.LEGENDARY,desc:'Close-range slash arc.',apply:()=>selectWeapon('katana')},
+        {id:'w_burst',name:'Burst Rifle',icon:'rail',rarity:RARITY.LEGENDARY,desc:'3-round bursts. Accurate mid-range.',apply:()=>selectWeapon('burst')},
+        {id:'w_sniper',name:'Sniper',icon:'rail',rarity:RARITY.LEGENDARY,desc:'High damage, high pierce, slow fire.',apply:()=>selectWeapon('sniper')},
         {id:'w_rail',name:'Railgun',icon:'rail',rarity:RARITY.LEGENDARY,desc:'Fast, piercing beam shot.',apply:()=>selectWeapon('railgun')},
         {id:'w_rocket',name:'Rocket Launcher',icon:'rocket',rarity:RARITY.LEGENDARY,desc:'Explosive rockets.',apply:()=>selectWeapon('rocket')},
         {id:'w_minigun',name:'Minigun',icon:'rate',rarity:RARITY.LEGENDARY,desc:'Very fast, low-damage stream of bullets.',apply:()=>selectWeapon('minigun')},
@@ -453,12 +469,13 @@
         player.weaponType=type;
         if(type==='pistol'){player.fireRate=7;player.weapon.magazineSize=15;player.weapon.magazine=player.weapon.magazineSize;player.weapon.reloadTime=1.1;player.weapon.reloadTimer=0;player.weapon.reloading=false;player.bulletDamage=36;player.bulletSpeed=560;player.spreadDeg=0;}
         else if(type==='shotgun'){player.fireRate=1.2;player.weapon.pellets=7;player.weapon.pelletSpreadDeg=34;player.weapon.pelletLife=0.6;player.bulletDamage=10;player.bulletSpeed=520;player.spreadDeg=20;}
-        else if(type==='katana'){player.weapon.katanaCooldown=0.35;player.weapon.katanaRange=86;player.weapon.katanaArcDeg=100;player.weapon.katanaDamage=42;}
-        else if(type==='railgun'){player.fireRate=0.6;player.bulletDamage=120;player.bulletSpeed=1400;player.spreadDeg=2;player.pierceCount=8;}
+        else if(type==='railgun'){player.fireRate=0.9;player.bulletDamage=120;player.bulletSpeed=1100;player.spreadDeg=0;player.pierceCount=Math.max(player.pierceCount,8);}
         else if(type==='rocket'){player.fireRate=0.8;player.bulletDamage=40;player.bulletSpeed=420;player.spreadDeg=4;}
         else if(type==='minigun'){player.fireRate=16;player.bulletDamage=6;player.bulletSpeed=600;player.spreadDeg=6;}
         else if(type==='smg'){player.fireRate=14;player.bulletDamage=9;player.bulletSpeed=580;player.spreadDeg=12;}
         else if(type==='crossbow'){player.fireRate=1.1;player.bulletDamage=90;player.bulletSpeed=900;player.spreadDeg=1;player.pierceCount=Math.max(player.pierceCount,3);} 
+        else if(type==='burst'){player.fireRate=3.2; player.bulletDamage=18; player.bulletSpeed=620; player.spreadDeg=4; player.weapon.burst.size=3; player.weapon.burst.interval=0.07; player.weapon.burst.active=false;}
+        else if(type==='sniper'){player.fireRate=0.7; player.bulletDamage=180; player.bulletSpeed=1200; player.spreadDeg=0; player.pierceCount=Math.max(player.pierceCount,6); player.bulletRadius=6;}
         else {player.fireRate=5;player.bulletDamage=16;player.bulletSpeed=520;player.spreadDeg=10;}
         updateHud();
       }
@@ -468,7 +485,9 @@
         const baseLife=overrides.life??player.baseBulletLife, life=baseLife*player.bulletLifeMultiplier, speed=overrides.speed??player.bulletSpeed, radius=overrides.radius??player.bulletRadius, damage=overrides.damage??player.bulletDamage, color=overrides.color??'#93c5fd';
         const explodeRadius=overrides.explodeRadius??0, explodeDamage=overrides.explodeDamage??0, homing=overrides.homing??player.homingStrength, source=overrides.source??player.weaponType;
         const vx=Math.cos(a)*speed, vy=Math.sin(a)*speed;
-        bullets.push({x,y,vx,vy,radius,damage,life,color,pierceLeft:(overrides.pierce??player.pierceCount),bouncesLeft:(overrides.bounce??player.bounceCount),fireLevel:(overrides.fireLevel??player.mods.bulletFireLevel),poisonLevel:(overrides.poisonLevel??player.mods.bulletPoisonLevel),explodeRadius,explodeDamage,homing,source});
+        const fireLevel = overrides.fireLevel ?? (player.mods?.bulletFireLevel ?? 0);
+        const poisonLevel = overrides.poisonLevel ?? (player.mods?.bulletPoisonLevel ?? 0);
+        bullets.push({x,y,vx,vy,radius,damage,life,color,pierceLeft:(overrides.pierce??player.pierceCount),bouncesLeft:(overrides.bounce??player.bounceCount),fireLevel,poisonLevel,explodeRadius,explodeDamage,homing,source});
       }
       function spawnPickups(x,y,c){for(let i=0;i<c;i++){const ang=randRange(0,Math.PI*2),s=randRange(40,120);pickups.push({x,y,vx:Math.cos(ang)*s,vy:Math.sin(ang)*s,r:4,life:4,value:5});}}
       function spawnParticles(x,y,color,c=10){for(let i=0;i<c;i++){const a=randRange(0,Math.PI*2),s=randRange(40,220);particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:randRange(1,2.5),color,life:randRange(0.25,0.6)});}}
@@ -542,18 +561,22 @@
         if(player.fireCooldown>0)return false;
         if(player.weaponType==='pistol'){
           if(player.weapon.reloading)return false; if(player.weapon.magazine<=0){startReload();return false;}
-          fireDualMulti(angle,{color:'#22d3ee'}); if(player.mods.pistolDoubleTap && Math.random()<0.25) fireDualMulti(angle,{color:'#22d3ee'}); playShootSound('pistol');
-          player.weapon.magazine-=1; player.fireCooldown=cd; return true;
+          const ov={color:'#60a5fa'}; if(player.mods.pistolDoubleTap){ fireDualMulti(angle,ov);} else { fireMulti(angle,ov);} player.weapon.magazine-=1; playShootSound('pistol'); player.fireCooldown=cd; return true;
         }
-        if(player.weaponType==='shotgun'){
-          const n=player.weapon.pellets,deg=player.weapon.pelletSpreadDeg,rad=(deg*Math.PI)/180,baseA=angle-rad*0.5;
-          for(let i=0;i<n;i++){const t=n>1?i/(n-1):0.5; const a=baseA+t*rad+randRange(-0.04,0.04); spawnBullet(player.x,player.y,a,{life:player.weapon.pelletLife,damage:player.bulletDamage,color:'#f59e0b'});} playShootSound('shotgun');
-          player.fireCooldown=cd; return true;
-        }
-        if(player.weaponType==='railgun'){spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(8,player.pierceCount+8),radius:12,life:1.2,color:'#a78bfa',source:'railgun'}); playShootSound('railgun'); player.fireCooldown=cd; return true;}
-        if(player.weaponType==='rocket'){const R=80*rocketExplosionScale,D=90*rocketExplosionScale; spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,radius:6,life:2.0,color:'#ef4444',explodeRadius:R,explodeDamage:D,source:'rocket'}); playShootSound('rocket'); player.fireCooldown=cd; return true;}
+        if(player.weaponType==='shotgun'){ const n=player.weapon.pellets, s=(player.weapon.pelletSpreadDeg*Math.PI)/180, baseAng=angle-s*(n-1)/2; for(let i=0;i<n;i++)spawnBullet(player.x,player.y,baseAng+s*i,{life:player.weapon.pelletLife}); playShootSound('shotgun'); player.fireCooldown=cd; return true; }
+        if(player.weaponType==='railgun'){ spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(8,player.pierceCount+8),radius:12,life:1.2,color:'#a78bfa',source:'railgun'}); playShootSound('railgun'); player.fireCooldown=cd; return true; }
+        if(player.weaponType==='rocket'){ const R=80*rocketExplosionScale,D=90*rocketExplosionScale; spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,radius:6,life:2.0,color:'#ef4444',explodeRadius:R,explodeDamage:D,source:'rocket'}); playShootSound('rocket'); player.fireCooldown=cd; return true; }
+        if(player.weaponType==='minigun'){ fireMulti(angle,{color:'#7dd3fc'}); playShootSound('basic'); player.fireCooldown=cd*0.7; return true; }
         if(player.weaponType==='smg'){ fireMulti(angle,{color:'#7dd3fc'}); playShootSound('smg'); player.fireCooldown=cd*0.85; return true; }
         if(player.weaponType==='crossbow'){ spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(4,player.pierceCount+2),radius:8,life:1.8,color:'#fbbf24',source:'crossbow'}); playShootSound('crossbow'); player.fireCooldown=cd; return true; }
+        if(player.weaponType==='burst'){
+          // Start a burst if not active
+          if(!player.weapon.burst.active){
+            player.weapon.burst.active=true; player.weapon.burst.shotsLeft=player.weapon.burst.size; player.weapon.burst.timer=0; player.lastAimAngle=angle;
+          }
+          return false; // actual firing handled in update burst handler
+        }
+        if(player.weaponType==='sniper'){ spawnBullet(player.x,player.y,angle,{speed:player.bulletSpeed,damage:player.bulletDamage,pierce:Math.max(6,player.pierceCount+6),radius:6,life:1.6,color:'#fde68a',source:'sniper'}); playShootSound('sniper'); player.fireCooldown=cd; return true; }
         fireMulti(angle,{color:'#93c5fd'}); playShootSound('basic'); player.fireCooldown=cd; return true;
       }
       function fireMulti(angle,ov){const n=1+player.multiShot; if(n<=1){spawnBullet(player.x,player.y,angle,ov);return;} const s=(player.spreadDeg*Math.PI)/180,base=angle-s*(n-1)/2; for(let i=0;i<n;i++)spawnBullet(player.x,player.y,base+s*i,ov);}
@@ -583,20 +606,75 @@
       // Update & draw
       let last=performance.now();
       function update(dt){
+        // Preserve the unmodified dt for timers that should ignore hit-stop slowdown
+        const realDt=dt; // keep real time for timers unaffected by hit-stop
+        // Advance global world clock by the current frame delta
         world.time+=dt;
+        // --- Hit feedback timers ---
+        // Fade out the red hit flash over time using real (unscaled) time
+        if(hitFlashTimer>0){ hitFlashTimer=Math.max(0, hitFlashTimer-realDt); }
+        // Reduce hit-stop timer with real time; while active, scale gameplay time down for a snappy pause effect
+        if(hitStopTimer>0){ hitStopTimer=Math.max(0, hitStopTimer-realDt); dt*=0.2; }
+        // --- Screen shake timer ---
+        // Count down the remaining screen shake duration
+        if(screenShake.timer>0){ screenShake.timer=Math.max(0,screenShake.timer-dt); }
+        // --- Floating damage numbers ---
+        // Update damage numbers even when not in 'playing' so they always fade out
+        for(let i=damageNumbers.length-1;i>=0;i--){
+          const n=damageNumbers[i]; // current floating number
+          n.y+=n.vy*dt; // move upward according to vertical velocity
+          n.vy*=0.98;   // slight damping for a smoother float
+          n.life-=dt;   // reduce remaining lifetime
+          if(n.life<=0) damageNumbers.splice(i,1); // remove when expired
+        }
+        // If the game is paused/overlayed, stop updating gameplay entities here
         if(world.state!=='playing')return;
 
-        // Movement
-        const ix=(keysDown.has('d')?1:0)-(keysDown.has('a')?1:0), iy=(keysDown.has('s')?1:0)-(keysDown.has('w')?1:0), len=Math.hypot(ix,iy)||1, speed=player.isDashing?player.dashSpeed:player.baseMoveSpeed;
-        player.velocityX=(ix/len)*speed; player.velocityY=(iy/len)*speed; player.x=clamp(player.x+player.velocityX*dt,player.radius,canvas.clientWidth-player.radius); player.y=clamp(player.y+player.velocityY*dt,player.radius,canvas.clientHeight-player.radius);
-        if(player.isDashing){player.dashTime-=dt; if(player.dashTime<=0)player.isDashing=false;} else {player.dashCooldownTimer=Math.max(0,player.dashCooldownTimer-dt);}
+        // --- Player movement ---
+        // Compute input axes from WASD keys
+        const ix=(keysDown.has('d')?1:0)-(keysDown.has('a')?1:0), iy=(keysDown.has('s')?1:0)-(keysDown.has('w')?1:0);
+        const len=Math.hypot(ix,iy)||1; // normalize to avoid division by zero
+        const speed=player.isDashing?player.dashSpeed:player.baseMoveSpeed; // choose dash or normal speed
+        // Update velocity from input and clamp player position inside the canvas
+        player.velocityX=(ix/len)*speed; player.velocityY=(iy/len)*speed;
+        player.x=clamp(player.x+player.velocityX*dt,player.radius,canvas.clientWidth-player.radius);
+        player.y=clamp(player.y+player.velocityY*dt,player.radius,canvas.clientHeight-player.radius);
+        // Update dash state and cooldown
+        if(player.isDashing){player.dashTime-=dt; if(player.dashTime<=0)player.isDashing=false;} else {player.dashCooldownTimer=Math.max(0,player.dashCooldownTimer-dt);}        
 
-        // Reload & katana cooldown
+        // --- Reload & melee cooldowns ---
+        // Pistol: advance reload timer and refill magazine on completion
         if(player.weaponType==='pistol'&&player.weapon.reloading){player.weapon.reloadTimer-=dt; if(player.weapon.reloadTimer<=0){player.weapon.reloading=false;player.weapon.magazine=player.weapon.magazineSize;}}
+        // Katana: count down slash cooldown
         if(player.weapon.katanaCooldownTimer>0)player.weapon.katanaCooldownTimer-=dt;
 
-        // Shooting
-        player.fireCooldown-=dt; let aim = mouseDown ? aimFromMouse() : aimFromArrows(); if(!aim && player.autoFire) aim=aimAtNearestEnemy(); if(aim)tryShoot(aim.angle);
+        // --- Shooting ---
+        // Reduce generic fire cooldown timer
+        player.fireCooldown-=dt;
+        // Determine aim source: mouse if pressed, else arrow keys; fallback to auto-fire target
+        let aim = mouseDown ? aimFromMouse() : aimFromArrows();
+        if(!aim && player.autoFire) aim=aimAtNearestEnemy();
+        // If we have an aim direction, remember the angle and attempt to shoot the current weapon
+        if(aim){ player.lastAimAngle=aim.angle; tryShoot(aim.angle);} 
+        // Burst weapon sequencer: emits follow-up shots at fixed intervals after initial trigger
+        if(player.weaponType==='burst' && player.weapon.burst.active){
+          player.weapon.burst.timer-=dt; // countdown to next burst shot
+          if(player.weapon.burst.timer<=0 && player.fireCooldown<=0){
+            // Fire a burst bullet along the stored aim angle
+            spawnBullet(player.x,player.y,player.lastAimAngle,{speed:player.bulletSpeed,damage:player.bulletDamage,color:'#a7f3d0'});
+            playShootSound('burst');
+            player.weapon.burst.shotsLeft-=1; // consume a shot in this burst
+            if(player.weapon.burst.shotsLeft>0){
+              // Schedule next shot in the same burst and lightly throttle fire cooldown
+              player.weapon.burst.timer=player.weapon.burst.interval;
+              player.fireCooldown=player.weapon.burst.interval*0.9;
+            }else{
+              // End of burst; re-arm after weapon fire rate delay
+              player.weapon.burst.active=false;
+              player.fireCooldown=(1/player.fireRate); // cooldown until next burst
+            }
+          }
+        }
 
         // Bullets
         for(let i=bullets.length-1;i>=0;i--){
@@ -628,7 +706,9 @@
             }
             exploded=true;
           }
-          let dmg=b.damage; if(Math.random()<player.critChance){dmg*=player.critMultiplier;spawnParticles(e.x,e.y,'#fde68a',6);} e.hp-=dmg; e.lastDamageSource='bullet';
+          let dmg=b.damage; let crit=false; if(Math.random()<player.critChance){crit=true; dmg*=player.critMultiplier;spawnParticles(e.x,e.y,'#fde68a',6);} e.hp-=dmg; e.lastDamageSource='bullet';
+          // Floating damage numbers
+          damageNumbers.push({x:e.x,y:e.y,val:Math.round(dmg),crit,vy:-40,life:0.6});
           if(b.fireLevel>0){e.burnTime=Math.max(e.burnTime,2.5+0.6*(b.fireLevel-1));e.burnDps=Math.max(e.burnDps,6*b.fireLevel);}
           if(b.poisonLevel>0){e.poisonTime=Math.max(e.poisonTime,3.0+0.6*(b.poisonLevel-1));e.poisonDps=Math.max(e.poisonDps,5*b.poisonLevel);}
           if(player.weaponType==='shotgun'&&player.mods.shotgunKnockback){const push=12,lenv=Math.hypot(b.vx,b.vy)||1; e.x+=(b.vx/lenv)*push; e.y+=(b.vy/lenv)*push;}
@@ -649,7 +729,14 @@
           if(e.poisonTime>0){e.poisonTime-=dt; e.hp-=e.poisonDps*dt; e.lastDamageSource='dot';}
           const touch=e.radius+player.radius;
           if(Math.hypot(player.x-e.x,player.y-e.y)<touch){
+            const prevHp = player.hp;
             player.hp-=e.damage*dt*0.5;
+            // Trigger hit feedback on damage
+            if(player.hp < prevHp) {
+              triggerScreenShake(6, 0.12);
+              hitFlashTimer=hitFlashDuration;
+              hitStopTimer=Math.max(hitStopTimer,0.08);
+            }
             if(player.hp<=0){
               player.hp=0;updateHud(); world.state='gameover';
               continueBtn.classList.add('hidden'); gameOverTitle.textContent='You were defeated'; finalStats.textContent=`Reached Round ${world.round} · Kills ${world.totalKills} · Score ${world.score}`; gameOverOverlay.classList.add('show'); return;
@@ -693,11 +780,23 @@
       function updateHud(){const hpPct=clamp(player.hp/player.maxHp,0,1); hpFillEl.style.width=`${Math.round(hpPct*100)}%`; hpTextEl.textContent=`${Math.round(player.hp)}/${player.maxHp}`; const weaponLabel=(player.weaponType==='pistol')?'Dual pistols':(player.weaponType[0].toUpperCase()+player.weaponType.slice(1)); weaponTextEl.textContent=`Weapon: ${weaponLabel}`; if(player.weaponType==='pistol'){ammoTextEl.textContent=player.weapon.reloading?`Reloading...`:`Ammo: ${player.weapon.magazine}/${player.weapon.magazineSize}`; ammoTextEl.classList.remove('hidden');} else ammoTextEl.classList.add('hidden'); if(world.score>world.bestScore){world.bestScore=world.score; try{localStorage.setItem('topScore',String(world.bestScore));}catch(e){}} bestTextEl.textContent=`Best ${world.bestScore}`; soundTextEl.textContent=world.soundEnabled?'Sound On':'Sound Off';}
 
       function draw(){
-        // Clear with padding (for subtle shake compatibility)
-        ctx.clearRect(-50,-50,canvas.clientWidth+100,canvas.clientHeight+100);
+  // Compute shake offset (no DPR reset)
+  let shakeX=0,shakeY=0; // initialize per-frame screen shake offsets
+  if(screenShake.timer>0){
+    const s=screenShake.intensity*(screenShake.timer/(screenShake.duration||1)); // scale shake by remaining time
+    shakeX=(Math.random()*2-1)*s; // random horizontal jitter in [-s, s]
+    shakeY=(Math.random()*2-1)*s; // random vertical jitter in [-s, s]
+  }
 
-        // Animated grid (subtle)
-        ctx.save(); ctx.globalAlpha=.06; ctx.strokeStyle='#93a4b833'; const g=48; const offset=(world.time*10)%g;
+  // Clear with padding (for subtle shake compatibility)
+  ctx.clearRect(-50,-50,canvas.clientWidth+100,canvas.clientHeight+100); // wipe slightly outside view to avoid edges during shake
+
+  // Apply shake transform
+  ctx.save(); // push current transform/state
+  ctx.translate(shakeX,shakeY); // apply screen shake translation
+
+  // Animated grid (subtle)
+  ctx.save(); ctx.globalAlpha=.06; ctx.strokeStyle='#93a4b833'; const g=48; const offset=(world.time*10)%g; // faint grid lines drifting over time
         for(let x=-offset;x<canvas.clientWidth+g;x+=g){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.clientHeight);ctx.stroke();}
         for(let y=-offset;y<canvas.clientHeight+g;y+=g){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.clientWidth,y);ctx.stroke();}
         ctx.restore();
@@ -757,6 +856,20 @@
         // Player with soft glow
         ctx.save();ctx.globalAlpha=0.3;ctx.fillStyle=player.color;ctx.beginPath();ctx.arc(player.x,player.y,player.radius*1.6,0,Math.PI*2);ctx.fill();ctx.restore();
         ctx.fillStyle=player.color;ctx.beginPath();ctx.arc(player.x,player.y,player.radius,0,Math.PI*2);ctx.fill();
+        // Damage flash overlay
+        if(hitFlashTimer>0){ const a=hitFlashTimer/hitFlashDuration; ctx.save(); ctx.globalAlpha=0.35*a; ctx.fillStyle='#ef4444'; ctx.beginPath(); ctx.arc(player.x,player.y,player.radius*1.6,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+
+        // Floating damage numbers draw
+        ctx.font='600 14px Inter, system-ui, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        for(const n of damageNumbers){
+          const alpha=clamp(n.life/0.6,0,1);
+          ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle=n.crit?'#fde047':'#e5e7eb';
+          ctx.fillText(String(n.val), n.x, n.y);
+          ctx.restore();
+        }
+        
+        // Remove shake transform
+        ctx.restore();
       }
 
       function loop(now){const dt=clamp((now-last)/1000,0,0.05);last=now;update(dt);draw();requestAnimationFrame(loop);} requestAnimationFrame(loop);
