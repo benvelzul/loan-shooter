@@ -637,8 +637,8 @@
         const speed=player.isDashing?player.dashSpeed:player.baseMoveSpeed; // choose dash or normal speed
         // Update velocity from input and clamp player position inside the canvas
         player.velocityX=(ix/len)*speed; player.velocityY=(iy/len)*speed;
-        player.x=clamp(player.x+player.velocityX*dt,player.radius,canvas.clientWidth-player.radius);
-        player.y=clamp(player.y+player.velocityY*dt,player.radius,canvas.clientHeight-player.radius);
+        player.x=clamp(player.x+player.velocityX*realDt,player.radius,canvas.clientWidth-player.radius);
+        player.y=clamp(player.y+player.velocityY*realDt,player.radius,canvas.clientHeight-player.radius);
         // Update dash state and cooldown
         if(player.isDashing){player.dashTime-=dt; if(player.dashTime<=0)player.isDashing=false;} else {player.dashCooldownTimer=Math.max(0,player.dashCooldownTimer-dt);}        
 
